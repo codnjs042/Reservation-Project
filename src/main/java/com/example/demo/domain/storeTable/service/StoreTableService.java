@@ -9,11 +9,11 @@ import com.example.demo.domain.storeTable.repository.StoreTableRepository;
 import com.example.demo.global.exception.BusinessException;
 import com.example.demo.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.Comparator;
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -60,10 +60,12 @@ public class StoreTableService {
             throw new BusinessException(ErrorCode.RESERVATION_GROUP_LIMIT);
     }
 
+    @Transactional
     public StoreTable matchTable(Long storeId, LocalDateTime targetDateTime, int headCount){
-        return storeTableRepository.findFreeTable(storeId, targetDateTime, ReservationStatus.CONFIRMED, headCount, StoreTableStatus.ACTIVE)
-                .stream()
-                .min(Comparator.comparingInt(StoreTable::getMaxCapacity))
+        List<StoreTable> freeTables = storeTableRepository.findFreeTableWithLock(storeId, targetDateTime, ReservationStatus.CONFIRMED, headCount, StoreTableStatus.ACTIVE);
+
+        return freeTables.stream()
+                .findFirst()
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_FULL_TIME));
     }
 

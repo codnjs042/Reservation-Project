@@ -121,7 +121,8 @@ public class AdminInitializer implements ApplicationRunner {
     }
 
     private void createTables(Store store) {
-        storeTableService.create(store, "4인석", 1, 4, 10);
+        storeTableService.create(store, "2인석", 1, 2, 10);
+        storeTableService.create(store, "4인석", 2, 4, 10);
     }
 
     private Double parseDouble(String value) {

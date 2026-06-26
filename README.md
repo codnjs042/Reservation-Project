@@ -118,11 +118,9 @@ OPEN/HIDDEN ──► SHUTDOWN  (삭제 흐름만, 직접 전환 불가)
 Schedule 전체 삭제 또는 StoreTable 전체 삭제 → Store 자동 READY 복귀
 ```
 
-### 배포 인프라
+### 시스템 아키텍처
 
 ![infra](./docs/infra.png)
-
-GitHub Actions(`main` 브랜치 push) → EC2 SSH → git pull → Gradle 빌드 → 재시작
 
 ---
 

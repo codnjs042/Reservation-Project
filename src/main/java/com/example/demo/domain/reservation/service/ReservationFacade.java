@@ -29,7 +29,7 @@ public class ReservationFacade {
 
     @Transactional
     public ReservationCreateResponse reserve(User user, Long storeId, ReservationCreateRequest dto){
-        Store store = storeService.findByIdWithLock(storeId);
+        Store store = storeService.findById(storeId);
 
         //단체 예약 여부
         storeTableService.validateGroup(store.getId(), dto.headCount());

@@ -10,6 +10,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -207,4 +208,9 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             where r.id in :ids
             """)
     List<Reservation> findAllByIdWithLock(@Param("ids") List<Long> ids);
+
+    List<Reservation> findByStoreIdAndTargetDateTime(Long storeId, LocalDateTime targetDateTime);
+
+    @Transactional
+    void deleteByStoreIdAndTargetDateTime(Long storeId, LocalDateTime targetDateTime);
 }

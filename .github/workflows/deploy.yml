@@ -6,6 +6,9 @@ on:
     paths:
       - 'src/**'
       - 'build.gradle'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'nginx.conf'
       - '.github/workflows/deploy.yml'
 
 jobs:
