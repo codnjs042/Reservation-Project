@@ -38,6 +38,9 @@ dependencies {
 	implementation 'io.jsonwebtoken:jjwt-impl:0.13.0'
 	implementation 'io.jsonwebtoken:jjwt-jackson:0.13.0'
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.apache.httpcomponents.client5:httpclient5'
+	implementation 'org.springframework.boot:spring-boot-starter-aspectj'
+	implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
 	implementation 'org.springframework.boot:spring-boot-flyway'
 	implementation 'org.flywaydb:flyway-core'
 	implementation 'org.flywaydb:flyway-mysql'
@@ -51,9 +54,22 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.wiremock:wiremock-standalone:3.9.2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+	useJUnitPlatform {
+		excludeTags 'manual'
+	}
+}
+
+tasks.register('manualTest', Test) {
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'manual'
+	}
+	group = 'verification'
+	description = '실제 외부 API를 호출하는 수동 테스트 (p95 관찰용)'
 }

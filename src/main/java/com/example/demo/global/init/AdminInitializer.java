@@ -12,31 +12,39 @@ import com.example.demo.domain.user.domain.UserLoginType;
 import com.example.demo.domain.user.domain.UserRole;
 import com.example.demo.domain.user.domain.UserStatus;
 import com.example.demo.domain.user.repository.UserRepository;
-import com.example.demo.global.infra.culture.CultureClient;
-import com.example.demo.global.infra.culture.CultureDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class AdminInitializer implements ApplicationRunner {
+    private static final String STORE_SEED_CSV = "data/stores.csv";
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final StoreRepository storeRepository;
-    private final CultureClient cultureClient;
     private final ScheduleService scheduleService;
     private final StoreTableService storeTableService;
+
+    private static final int TEST_USER_COUNT = 200;
 
     @Value("${admin.username}")
     private String adminUsername;
@@ -44,11 +52,45 @@ public class AdminInitializer implements ApplicationRunner {
     @Value("${admin.password}")
     private String adminPassword;
 
+    @Value("${test.username}")
+    private String loadTestUsername;
+
+    @Value("${test.password}")
+    private String loadTestPassword;
+
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
         User admin = getOrCreateAdmin();
         createStoresIfAbsent(admin);
+        createLoadTestUsersIfAbsent();
+    }
+
+    private void createLoadTestUsersIfAbsent() {
+        String encodedPassword = passwordEncoder.encode(loadTestPassword);
+        int created = 0;
+
+        for (int i = 1; i <= TEST_USER_COUNT; i++) {
+            String username = loadTestUsername + String.format("%04d", i);
+
+            if (userRepository.existsByUsernameAndDeletedVersion(username, 0L)) {
+                continue;
+            }
+
+            User loadTestUser = User.builder()
+                    .username(username)
+                    .nickname(username)
+                    .password(encodedPassword)
+                    .loginType(UserLoginType.LOCAL)
+                    .role(UserRole.USER)
+                    .status(UserStatus.ACTIVE)
+                    .build();
+            userRepository.save(loadTestUser);
+            created++;
+        }
+
+        log.info("[AdminInitializer] 부하테스트용 유저 {}건 생성 완료 ({}0001~{}{})",
+                created, loadTestUsername, loadTestUsername, String.format("%04d", TEST_USER_COUNT));
     }
 
     private User getOrCreateAdmin() {
@@ -77,32 +119,78 @@ public class AdminInitializer implements ApplicationRunner {
             return;
         }
 
-        List<CultureDto> cultureDtos = cultureClient.fetchCultureData("천안시", "한식");
-        if (cultureDtos.isEmpty()) {
-            log.warn("[AdminInitializer] CultureAPI 조회 결과 없음 — 가게 생성 생략");
+        List<StoreSeedRow> csvRows = loadStoreRowsFromCsv();
+        if (csvRows.isEmpty()) {
+            log.warn("[AdminInitializer] stores.csv 로드 결과 없음 — 가게 생성 생략");
             return;
         }
 
-        for (int i = 0; i < cultureDtos.size(); i++) {
-            CultureDto dto = cultureDtos.get(i);
+        createStoresFromCsvRows(admin, csvRows);
+    }
 
-            Double latitude = parseDouble(dto.latitude());
-            Double longitude = parseDouble(dto.longitude());
+    private record StoreSeedRow(String name, StoreCategory category, String address, String detailAddress,
+                                 String zipCode, String sigunguCode, Double latitude, Double longitude,
+                                 String phone, String ownerName, String businessNumber, StoreStatus status) {
+    }
 
+    private List<StoreSeedRow> loadStoreRowsFromCsv() {
+        ClassPathResource resource = new ClassPathResource(STORE_SEED_CSV);
+        if (!resource.exists()) {
+            return List.of();
+        }
+
+        Map<String, StoreSeedRow> rows = new LinkedHashMap<>();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8))) {
+            reader.readLine(); // header
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) continue;
+                String[] cols = line.split("\t", -1);
+                String name = cols[1];
+                String address = cols[3];
+                String detailAddress = "NULL".equals(cols[4]) ? null : cols[4];
+
+                StoreSeedRow row = new StoreSeedRow(
+                        name,
+                        StoreCategory.valueOf(cols[2]),
+                        address,
+                        detailAddress,
+                        cols[5],
+                        cols[6],
+                        parseDouble(cols[7]),
+                        parseDouble(cols[8]),
+                        cols[9],
+                        cols[11],
+                        cols[12],
+                        StoreStatus.valueOf(cols[14]));
+                rows.putIfAbsent(name + "|" + address, row);
+            }
+        } catch (IOException e) {
+            log.error("[AdminInitializer] stores.csv 로드 실패: {}", e.getMessage());
+            return List.of();
+        }
+
+        log.info("[AdminInitializer] stores.csv 로드 완료 ({}건)", rows.size());
+        return List.copyOf(rows.values());
+    }
+
+    private void createStoresFromCsvRows(User admin, List<StoreSeedRow> rows) {
+        for (StoreSeedRow row : rows) {
             Store store = Store.builder()
-                    .name(dto.name())
-                    .category(StoreCategory.KOREAN)
-                    .address(dto.address())
-                    .detailAddress(null)
-                    .zipCode("00000")
-                    .sigunguCode(dto.sigunguCode())
-                    .latitude(latitude)
-                    .longitude(longitude)
-                    .phone("00000000")
+                    .name(row.name())
+                    .category(row.category())
+                    .address(row.address())
+                    .detailAddress(row.detailAddress())
+                    .zipCode(row.zipCode())
+                    .sigunguCode(row.sigunguCode())
+                    .latitude(row.latitude())
+                    .longitude(row.longitude())
+                    .phone(row.phone())
                     .owner(admin)
-                    .ownerName("관리자")
-                    .businessNumber(String.format("%010d", i + 1))
-                    .status(StoreStatus.OPEN)
+                    .ownerName(row.ownerName())
+                    .businessNumber(row.businessNumber())
+                    .status(row.status())
                     .build();
 
             Store saved = storeRepository.save(store);
@@ -110,7 +198,7 @@ public class AdminInitializer implements ApplicationRunner {
             createTables(saved);
         }
 
-        log.info("[AdminInitializer] 가게 {}건 생성 완료 (스케줄·테이블 포함)", cultureDtos.size());
+        log.info("[AdminInitializer] 가게 {}건 생성 완료 (CSV, 스케줄·테이블 포함)", rows.size());
     }
 
     private void createSchedules(Store store) {

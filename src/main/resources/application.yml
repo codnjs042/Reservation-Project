@@ -56,7 +56,44 @@ spring:
 kakao:
   api:
     key: ${KAKAO_API_KEY}
+    base-url: ${KAKAO_BASE_URL:https://dapi.kakao.com/v2/local/search/address.json}
+
+vworld:
+  api:
+    base-url: ${VWORLD_BASE_URL:https://api.vworld.kr/req/data}
+
+culture:
+  api:
+    base-url: ${CULTURE_BASE_URL:https://api.kcisa.kr/openapi/API_CNV_063/request}
 
 admin:
   username: ${ADMIN_USERNAME}
   password: ${ADMIN_PASSWORD}
+
+test:
+  username: ${TEST_USERNAME}
+  password: ${TEST_PASSWORD}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      kakao:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      vworld:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+  bulkhead:
+    instances:
+      kakao:
+        max-concurrent-calls: 20
+        max-wait-duration: 0
+      vworld:
+        max-concurrent-calls: 20
+        max-wait-duration: 0

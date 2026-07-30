@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/mock/vworld/mixed"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "response": {
+        "result": {
+          "featureCollection": {
+            "features": [
+              {
+                "properties": {
+                  "sig_cd": "11110",
+                  "sig_kor_nm": "종로구"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "delayDistribution": {
+      "type": "uniform",
+      "lower": 100,
+      "upper": 700
+    }
+  }
+}

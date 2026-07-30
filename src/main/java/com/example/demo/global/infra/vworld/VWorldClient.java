@@ -2,8 +2,11 @@ package com.example.demo.global.infra.vworld;
 
 import com.example.demo.global.exception.BusinessException;
 import com.example.demo.global.exception.ErrorCode;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpMethod;
@@ -22,13 +25,19 @@ public class VWorldClient {
     @Value("${vworld.api.key}")
     private String apiKey;
 
+    @Value("${vworld.api.base-url}")
+    private String baseUrl;
+
     @Value("${app.backend-url}")
     private String domain;
 
+    @Qualifier("vworldRestTemplate")
     private final RestTemplate restTemplate;
 
+    @CircuitBreaker(name = "vworld", fallbackMethod = "fallbackGetArea")
+    @Bulkhead(name = "vworld", fallbackMethod = "fallbackGetArea")
     public List<AreaResponse> getArea(String cd){
-        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString("https://api.vworld.kr/req/data")
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(baseUrl)
                 .queryParam("request", "GetFeature")
                 .queryParam("key", apiKey)
                 .queryParam("geometry", "false")
@@ -88,5 +97,10 @@ public class VWorldClient {
             throw new BusinessException(ErrorCode.EXTERNAL_API_ERROR);
         }
         return List.of();
+    }
+
+    private List<AreaResponse> fallbackGetArea(String cd, Throwable t) {
+        log.warn("[V-WORLD] 서킷브레이커/벌크헤드로 호출 차단됨. cd: {}, 원인: {}", cd, t.toString());
+        throw new BusinessException(ErrorCode.EXTERNAL_API_ERROR);
     }
 }

@@ -27,9 +27,9 @@ public class StoreFacade {
 
     @Transactional
     public StoreDetailResponse create(Long userId, StoreCreateRequest dto){
-        User user = userService.findByIdWithLock(userId);
-
         PointDto coordinates = kakaoLocalClient.getCoordinates(dto.address());
+
+        User user = userService.findByIdWithLock(userId);
 
         Store store = storeService.create(user, dto, coordinates);
 

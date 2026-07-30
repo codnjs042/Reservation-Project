@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/mock/kakao/mixed"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "documents": [
+        {
+          "x": "127.028361926941",
+          "y": "37.4979806737437"
+        }
+      ]
+    },
+    "delayDistribution": {
+      "type": "uniform",
+      "lower": 20,
+      "upper": 180
+    }
+  }
+}

@@ -2,6 +2,7 @@ package com.example.demo.global.infra.culture;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -20,14 +21,18 @@ public class CultureClient {
     @Value("${culture.api.key}")
     private String apiKey;
 
-    private static final String BASE_URL = "https://api.kcisa.kr/openapi/API_CNV_063/request";
+    @Value("${culture.api.base-url}")
+    private String baseUrl;
 
+    public static final int PAGE_SIZE = 1000;
+
+    @Qualifier("cultureRestTemplate")
     private final RestTemplate restTemplate;
 
     public List<CultureDto> fetchCultureData(String areaNm, String clNm) {
-        URI uri = UriComponentsBuilder.fromUriString(BASE_URL)
+        URI uri = UriComponentsBuilder.fromUriString(baseUrl)
                 .queryParam("serviceKey", apiKey)
-                .queryParam("numOfRows", 200)
+                .queryParam("numOfRows", PAGE_SIZE)
                 .queryParam("pageNo", 1)
                 .queryParam("areaNm", URLEncoder.encode(areaNm, StandardCharsets.UTF_8))
                 .queryParam("clNm", URLEncoder.encode(clNm, StandardCharsets.UTF_8))

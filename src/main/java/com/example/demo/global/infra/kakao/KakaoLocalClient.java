@@ -2,8 +2,11 @@ package com.example.demo.global.infra.kakao;
 
 import com.example.demo.global.exception.BusinessException;
 import com.example.demo.global.exception.ErrorCode;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -22,10 +25,16 @@ public class KakaoLocalClient {
     @Value("${kakao.api.key}")
     private String apiKey;
 
+    @Value("${kakao.api.base-url}")
+    private String baseUrl;
+
+    @Qualifier("kakaoRestTemplate")
     private final RestTemplate restTemplate;
 
+    @CircuitBreaker(name = "kakao", fallbackMethod = "fallbackGetCoordinates")
+    @Bulkhead(name = "kakao", fallbackMethod = "fallbackGetCoordinates")
     public PointDto getCoordinates(String address) {
-        URI uri = UriComponentsBuilder.fromUriString("https://dapi.kakao.com/v2/local/search/address.json")
+        URI uri = UriComponentsBuilder.fromUriString(baseUrl)
                 .queryParam("query", address)
                 .build()
                 .encode()
@@ -57,6 +66,11 @@ public class KakaoLocalClient {
         } catch (Exception e) {
             log.error("[KakaoAPI Error] API 호출 중 오류 발생: {}", e.getMessage());
         }
+        throw new BusinessException(ErrorCode.ADDRESS_NOT_FOUND);
+    }
+
+    private PointDto fallbackGetCoordinates(String address, Throwable t) {
+        log.warn("[KakaoAPI Fallback] 서킷브레이커/벌크헤드로 호출 차단됨. 주소: {}, 원인: {}", address, t.toString());
         throw new BusinessException(ErrorCode.ADDRESS_NOT_FOUND);
     }
 }
