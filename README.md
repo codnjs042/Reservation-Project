@@ -10,7 +10,7 @@
 
 ### 유저
 - 로컬 회원가입 / 로그인 + Google · Kakao · Naver 소셜 로그인
-- 반경 3km 가게 지도 검색, 키워드·카테고리·지역 필터 검색, 인기 가게 TOP 6 조회
+- 반경 3km 가게 지도 검색, 키워드·카테고리·지역 필터 검색, 인기 가게 TOP 9 조회
 - 예약 가능 타임슬롯 조회 → 예약 신청 → 예약 취소
 - 관심 가게 등록·해제
 - 닉네임·이메일·비밀번호 변경, 회원 탈퇴
@@ -26,7 +26,7 @@
 ### 관리자
 - 유저·가게·예약 전체 검색 및 상세 조회
 - 유저 강제 탈퇴 (영구 정지)
-- 서버 기동 시 한국문화정보원 API 기반 가게 데이터 자동 초기화
+- 서버 기동 시 CSV 기반 초기 가게 데이터 시딩 + 부하테스트용 유저 200명 자동 생성
 
 ---
 
@@ -40,7 +40,9 @@
 | Security | Spring Security, JJWT 0.13.0, Spring OAuth2 Client |
 | Database | MySQL, Redis |
 | Migration | Flyway |
-| External API | Kakao Local API, V-World API, 한국문화정보원 API |
+| External API | Kakao Local API, V-World API |
+| Resilience | Resilience4j (CircuitBreaker, Bulkhead) |
+| Load/Fault Testing | k6, WireMock |
 | Infra | AWS EC2 (t3.micro), Nginx, GitHub Actions |
 | Docs | SpringDoc OpenAPI 3.0.1 (Swagger UI) |
 | Etc | Lombok, P6Spy, Spring Actuator |
@@ -85,7 +87,7 @@ Controller
 
 ### 동시성 제어
 
-예약 생성·취소·테이블 수정 등 경합이 발생할 수 있는 흐름에서 **Pessimistic Write Lock** (3초 타임아웃)을 사용합니다.
+경합이 발생할 수 있는 흐름 전반에서 **Pessimistic Write Lock** (3초 타임아웃)을 사용합니다. 초과 시 발생하는 `PessimisticLockingFailureException`은 전역 예외 처리기가 자동으로 409(`LOCK_TIMEOUT`)로 매핑합니다.
 
 ```java
 @Lock(LockModeType.PESSIMISTIC_WRITE)
@@ -93,7 +95,31 @@ Controller
 Optional<Store> findByIdWithLock(@Param("id") Long id);
 ```
 
-`Store`, `User`, `Reservation` Repository에 동일 패턴 적용.
+`Store`, `User`, `Reservation` Repository에 동일 패턴 적용 — 가게 등록 시 유저 락, 영업시간/테이블 변경·가게 삭제 시 가게 락 등에 사용됩니다.
+
+**예약 생성만은 락 범위를 더 좁혔습니다.** 처음엔 예약 생성 시에도 가게 전체(`Store`)를 잠갔지만, 그러면 같은 가게에 대한 서로 다른 시간대·다른 테이블 예약 요청까지 전부 직렬화되어 처리량이 떨어졌습니다. 그래서 실제로 경합하는 자원인 "해당 시간대에 배정 가능한 테이블 1건"만 행 단위로 잠그도록 바꿨습니다.
+
+```java
+// StoreTableRepository — 배정 가능한 테이블 1건만 락
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@QueryHints({@QueryHint(name = "jakarta.persistence.lock.timeout", value = "3000")})
+@Query("""
+        select t from StoreTable t
+        where t.store.id = :storeId
+        and :headCount between t.minCapacity and t.maxCapacity
+        and t.status = :storeTableStatus
+        and not exists (
+            select 1 from Reservation r
+            where r.targetDateTime = :targetDateTime
+            and r.storeTable.id = t.id
+            and r.status = :reservationStatus)
+        order by t.maxCapacity asc
+        limit 1
+        """)
+List<StoreTable> findFreeTableWithLock(...);
+```
+
+다만 락 범위 축소만으로는 MySQL 기본 격리수준(REPEATABLE READ)의 트랜잭션 스냅샷 읽기 때문에, 동시 트랜잭션이 서로 상대방의 커밋을 못 보고 같은 테이블에 중복 배정하는 문제가 남아있었습니다. `spring.datasource.hikari.transaction-isolation`을 `READ COMMITTED`로 전역 조정해 해결했고, `CountDownLatch`/`ExecutorService` 기반 동시성 테스트(50 스레드 동시 요청 → 테이블 수만큼만 성공, 중복 배정 0건)로 검증했습니다.
 
 ### 소프트 삭제 전략
 
@@ -117,6 +143,16 @@ OPEN/HIDDEN ──► SHUTDOWN  (삭제 흐름만, 직접 전환 불가)
 
 Schedule 전체 삭제 또는 StoreTable 전체 삭제 → Store 자동 READY 복귀
 ```
+
+### 외부 API 장애 격리 & 부하테스트
+
+Kakao/V-World 같은 외부 API가 느려지거나 죽었을 때 서버 스레드가 함께 물려 죽지 않도록, 각 클라이언트를 전용 커넥션 풀 + 타임아웃 + Resilience4j `CircuitBreaker`/`Bulkhead`로 감쌌습니다.
+
+- API별로 별도 `RestTemplate` 빈 분리 (Apache HttpClient5 풀링, 연결 5초 / 응답 100~400ms 타임아웃)
+- 실패율 50% 초과 시 서킷 OPEN → 5초 후 HALF_OPEN 전환, 동시 호출 20건 제한(Bulkhead)
+- 서킷 차단/타임아웃 시에도 곧바로 도메인 예외(`ADDRESS_NOT_FOUND`, `EXTERNAL_API_ERROR`)로 귀결시켜 호출부가 실패 원인을 구분할 필요 없게 처리
+
+이 동작을 재현 가능한 상태로 검증하기 위해 WireMock으로 두 API를 모킹(요청마다 랜덤 지연으로 성공/타임아웃을 절반씩 섞음)하고, k6로 두 경로(가게 등록=Kakao, 지역조회=V-World)에 동시 트래픽을 발생시켜 서킷브레이커의 OPEN/HALF_OPEN 전환을 관찰했습니다 (`k6/circuit-breaker-bulkhead-mixed-traffic.js`). 부하테스트용 로그인 계정 200개는 서버 기동 시 자동 생성됩니다.
 
 ### 시스템 아키텍처
 
@@ -142,8 +178,8 @@ src/main/java/com/example/demo/
     ├── config/      Security·JPA·Redis·CORS 설정
     ├── exception/   BusinessException·ErrorCode·GlobalExceptionHandler
     ├── filter/      JwtAuthenticationFilter
-    ├── infra/       외부 API 클라이언트 (Kakao·VWorld·Culture)
-    ├── init/        서버 기동 시 관리자·가게 데이터 초기화
+    ├── infra/       외부 API 클라이언트 (Kakao·VWorld, Culture는 현재 미사용)
+    ├── init/        서버 기동 시 관리자 계정·CSV 기반 가게 시딩·부하테스트 유저 초기화
     ├── provider/    JwtTokenProvider
     ├── security/    CustomUserDetails
     └── util/        JwtUtil·RedisUtil·SecurityUtil
