@@ -1,6 +1,6 @@
 FROM gradle:8.14-jdk21 AS builder
 WORKDIR /app
-COPY build.gradle settings.gradle ./
+COPY build.gradle settings.gradle lombok.config ./
 COPY gradle ./gradle
 RUN gradle dependencies --no-daemon
 COPY src ./src
