@@ -8,9 +8,13 @@ import com.example.demo.domain.store.service.StoreService;
 import com.example.demo.domain.storeTable.domain.StoreTable;
 import com.example.demo.domain.storeTable.service.StoreTableService;
 import com.example.demo.domain.user.domain.User;
+import com.example.demo.global.exception.BusinessException;
+import com.example.demo.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -27,7 +31,8 @@ public class ReservationFacade {
     private final ScheduleService scheduleService;
     private final StoreTableService storeTableService;
 
-    @Transactional
+    //트랜잭션 취소
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ReservationCreateResponse reserve(User user, Long storeId, ReservationCreateRequest dto){
         Store store = storeService.findById(storeId);
 
@@ -37,13 +42,20 @@ public class ReservationFacade {
         //특정 요일의 예약 시간대 확인
         scheduleService.validateAvailableTime(store.getId(), dto.targetDateTime());
 
-        //예약 가능 테이블 확인 & 테이블 배정
-        StoreTable storeTable = storeTableService.matchTable(store.getId(), dto.targetDateTime(), dto.headCount());
+        //예약 가능 테이블 후보 (수용인원 오름차순, 락 없음)
+        List<StoreTable> candidates = storeTableService.findFreeTables(store.getId(), dto.targetDateTime(), dto.headCount());
 
-        //예약
-        Reservation reservation = reservationService.register(user, store, storeTable, dto);
+        //후보를 순서대로 시도, 유니크 제약 위반(다른 요청이 먼저 선점) 시 다음 후보로 재시도
+        for (StoreTable candidate : candidates) {
+            try {
+                Reservation reservation = reservationService.registerNewTransaction(user, store, candidate, dto);
+                return ReservationCreateResponse.from(reservation);
+            } catch (DataIntegrityViolationException e) {
+                log.info("테이블 {} 선점 경합으로 예약 실패, 다음 후보로 재시도", candidate.getId());
+            }
+        }
 
-        return ReservationCreateResponse.from(reservation);
+        throw new BusinessException(ErrorCode.RESERVATION_FULL_TIME);
     }
 
     public List<ReservationTimeSlotResponse> getTimeSlots(Long storeId, ReservationTimeSlotRequest dto) {

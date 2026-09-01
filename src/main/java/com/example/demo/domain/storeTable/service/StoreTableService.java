@@ -60,13 +60,13 @@ public class StoreTableService {
             throw new BusinessException(ErrorCode.RESERVATION_GROUP_LIMIT);
     }
 
-    @Transactional
-    public StoreTable matchTable(Long storeId, LocalDateTime targetDateTime, int headCount){
-        List<StoreTable> freeTables = storeTableRepository.findFreeTableWithLock(storeId, targetDateTime, ReservationStatus.CONFIRMED, headCount, StoreTableStatus.ACTIVE);
+    public List<StoreTable> findFreeTables(Long storeId, LocalDateTime targetDateTime, int headCount){
+        List<StoreTable> freeTables = storeTableRepository.findFreeTables(storeId, targetDateTime, ReservationStatus.CONFIRMED, headCount, StoreTableStatus.ACTIVE);
 
-        return freeTables.stream()
-                .findFirst()
-                .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_FULL_TIME));
+        if(freeTables.isEmpty())
+            throw new BusinessException(ErrorCode.RESERVATION_FULL_TIME);
+
+        return freeTables;
     }
 
     public List<StoreTable> findTableGroup(Long storeId, String tableName){

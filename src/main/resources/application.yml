@@ -6,10 +6,6 @@ spring:
   profiles:
     active: dev
 
-  datasource:
-    hikari:
-      transaction-isolation: TRANSACTION_READ_COMMITTED
-
   security:
     oauth2:
       client:
